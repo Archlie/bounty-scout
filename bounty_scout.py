@@ -1,22 +1,9 @@
 #!/usr/bin/env python3
 """bounty-scout: scan GitHub for funded/open bounty issues and flag scam patterns.
 
-Read-only GitHub API usage (Search issues). Requires GITHUB_PAT env var.
-Publishes a ranked, deduplicated list with scam risk tags.
-
-Usage:
-    GITHUB_PAT=ghp_xxx python3 bounty_scout.py [--queries "bounty is:issue is:open"] [--max-items 60]
-
-Scam flags (heuristic):
-    - repo in KNOWN_SPAM list (manually verified bad actors)
-    - repo age < 30 days and issue claims a big $ reward
-    - reward is an obscure token (RTC, MRG, GOLD, EGGS, ...) not USDC/USDT/$
-    - repo forks=0 and stars < 30 while offering > $10
-    - body contains 'opire' or 'frantic' and repo is not a well-known maintainer
-    - all PRs in repo are unmerged (checked lazily, only when flag triggered)
+Quick scan with 3 targeted queries. Requires GITHUB_PAT env var.
 """
 
-import argparse
 import json
 import os
 import re
@@ -26,107 +13,101 @@ import urllib.parse
 import urllib.request
 
 KNOWN_SPAM = [
-    "UnsafeLabs/Bounty-Hunters",
-    "SecureBananaLabs/bug-bounty",
-    "warpspeedopen-source",
-    "xevrion-v2/agent-playground",
-    "claude-builders-bounty/claude-builders-bounty",
-    "bounty-plaza/zhangjiayang6835-cyber",
-    "jahmeergnlt/traefik",
-    "Scottcjn/rustchain-bounties",
-    "mergeos-bounties",
+    "UnsafeLabs/Bounty-Hunters", "SecureBananaLabs/bug-bounty",
+    "xevrion-v2/agent-playground", "claude-builders-bounty/claude-builders-bounty",
+    "jahmeergnlt/traefik", "Scottcjn/rustchain-bounties", "mergeos-bounties",
+    "0xddneto/AI-Proof-of-Us", "theselfish/SlopStation13", "jflournoy/for-funsies",
+    "relayhop/sn-monetization-runtime", "relayhop/ClaudeEarnSelf-runtime",
+    "riteshekbote/whale-hunt", "riteshekbote/spare-hunt",
+    "rohitdash08/FinMind", "iii123iii/Crystal-PDF", "daydreamsai/agent-bounties",
+    "watney-ai/open-source-bounties", "tine1117/oss-hunter-livefire",
+    "Pay-Per-Token-LLM-Gateway/pay-per-token-llm-gateway",
+    "Bitcoindefi/OpenAO", "liubaining-louis/louis-os",
 ]
-REWARD_RE = re.compile(r"\$\s?\d+(?:\.\d+)?|USDC?\b|USDT\b|\b\d+\s*(?:USDC|USDT)\b|\b\d+-\d+\s*(?:USDC|USDT)\b|(?:\b\d+(?:\.\d+)?\s*(?:RTC|MRG|GOLD|EGGS?)\b)", re.IGNORECASE)
-TOKEN_RE = re.compile(r"\b\d+(?:\.\d+)?\s*(RTC|MRG|GOLD|EGGS?|TOKEN|COIN)\b", re.IGNORECASE)
+OPIRE_IMPERSONATORS = {"rasoolharlym8", "colmev080", "morriganreza973", "Kristywvs22", "EncarnacionP", "WillSmithTE", "ClankerNation"}
+SPAM_ORGS = {"MyZubster-Ecosystem", "DanielIoni-creator", "jaxassistant55"}
+TOKEN_RE = re.compile(r"\b\d+(?:\.\d+)?\s*(RTC|MRG|GOLD|EGGS?|MYZ|AIPOU|GSD|TOKEN|COIN)\b", re.IGNORECASE)
+REWARD_RE = re.compile(r"\$\s?\d+(?:\.\d+)?|USDC\b|USDT\b", re.IGNORECASE)
 
 
 def api(url, token):
-    req = urllib.request.Request(url, headers={"Authorization": f"Bearer {token}",
-                                              "Accept": "application/vnd.github+json",
-                                              "User-Agent": "bounty-scout"})
-    with urllib.request.urlopen(req, timeout=30) as r:
+    req = urllib.request.Request(url, headers={"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json", "User-Agent": "bounty-scout"})
+    with urllib.request.urlopen(req, timeout=15) as r:
         return json.load(r)
 
 
-def flag(issue, repo_meta):
+def flag(issue, meta):
     tags = []
-    rn = (repo_meta or {}).get("full_name", "").lower()
-    if rn in [s.lower() for s in KNOWN_SPAM]:
-        tags.append("SPAM-LIST")
     body = (issue.get("body") or "")[:4000]
     title = issue.get("title") or ""
     hay = (body + " " + title).lower()
-    if any(t in hay for t in ("opire", "frantic")):
-        tags.append("3rd-party-bounty-site")
+    labels = [l.get("name", "") for l in issue.get("labels", [])]
+    if "AI only allowed - no humans" in labels: tags.append("AI-ONLY-HONEYPOT")
+    if "Maybe Rewarded" in labels: tags.append("UNFUNDED")
+    if "AI agent friendly" in labels: tags.append("AGENT-BAIT")
     if "opire" in hay:
-        tags.append("read-carefully")
-    stars = (repo_meta or {}).get("stargazers_count", 0)
-    forks = (repo_meta or {}).get("forks_count", 0)
-    rewards = REWARD_RE.findall(hay)
-    big_cash = bool(re.search(r"\$\s?[5-9]\d|\$\s?\d{3,}", hay))
-    if big_cash and stars < 30 and forks < 5:
-        tags.append("new-little-repo-big-claim")
-    if TOKEN_RE.search(hay):
-        tags.append("token-flavored")
-    return sorted(set(tags)), rewards[:3]
+        tags.append("OPIRE-IMPERSONATION" if (meta.get("stargazers_count", 0) or 0) < 20 else "OPIRE")
+    if "frantic" in hay: tags.append("FRANTIC-MICRO")
+    if TOKEN_RE.search(hay): tags.append("TOKEN-NOT-CASH")
+    stars = meta.get("stargazers_count", 0) or 0
+    forks = meta.get("forks_count", 0) or 0
+    if re.search(r"\$\s?[5-9]\d|\$\s?\d{3,}", hay) and stars < 10 and forks < 5:
+        tags.append("NEW-LITTLE-REPO-BIG-CLAIM")
+    if "grantfox" in hay and "maybe rewarded" in hay: tags.append("GRANTFOX-UNFUNDED")
+    return sorted(tags)
 
 
 def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--queries", nargs="*", default=["bounty is:issue is:open",
-                                                     "funded is:issue is:open",
-                                                     "label:\"good first issue\" bounty is:issue is:open"])
-    ap.add_argument("--max-items", type=int, default=60)
-    ap.add_argument("--min-comments", type=int, default=0, help="skip issues with fewer comments")
-    args = ap.parse_args()
     token = os.environ.get("GITHUB_PAT", "")
     if not token:
         sys.exit("GITHUB_PAT env var required")
+    queries = [
+        'label:"$100" OR label:"$200" OR label:"$250" OR label:"$500" is:issue is:open',
+        'label:bounty label:bug is:issue is:open no:assignee',
+        'label:"💎 Bounty" state:open',
+    ]
     seen = {}
-    for q in args.queries:
-        url = ("https://api.github.com/search/issues?q="
-               + urllib.parse.quote(q) + "&sort=comments&order=desc&per_page=30")
+    for q in queries:
+        url = "https://api.github.com/search/issues?q=" + urllib.parse.quote(q) + "&sort=created&order=desc&per_page=8"
         try:
             data = api(url, token)
         except Exception as e:
-            print(f"# query failed [{q}]: {e}", file=sys.stderr)
+            print(f"# query failed: {e}", file=sys.stderr)
             continue
         for it in data.get("items", []):
-            if it["number"] in seen:
+            if it.get("pull_request") or it["number"] in seen:
                 continue
-            if it.get("comments", 0) < args.min_comments:
-                continue
-            pr = it.get("pull_request") is not None
-            if pr:
-                continue
-            seen[it["number"]] = {"issue": it, "repo": it["repository_url"].rsplit("/", 2)[-2:]}
-        time.sleep(0.7)
-    print(f"# unique issues: {len(seen)}")
+            seen[it["number"]] = it
+            time.sleep(0.3)
+    print(f"# raw: {len(seen)}")
     rows = []
-    for num, ent in seen.items():
-        it = ent["issue"]
-        own, repo = ent["repo"]
-        body = (it.get("body") or "")[:4000]
-        title = it.get("title") or ""
-        hay = (body + " " + title).lower()
-        # only pay for repo metadata when a reward claim exists or spam list hit
-        needs_meta = bool(REWARD_RE.search(hay)) or f"{own}/{repo}".lower() in [s.lower() for s in KNOWN_SPAM]
-        meta = None
-        if needs_meta:
-            try:
-                meta = api(f"https://api.github.com/repos/{own}/{repo}", token)
-                time.sleep(0.2)
-            except Exception:
-                meta = {"full_name": f"{own}/{repo}", "stargazers_count": 0, "forks_count": 0}
-        tags, rewards = flag(it, meta)
-        rows.append((it["comments"], num, own, repo, tags, rewards, it["title"][:90], it["html_url"]))
+    for num, it in seen.items():
+        ow, rn = it["repository_url"].rsplit("/", 2)[-2:]
+        try:
+            meta = api(f"https://api.github.com/repos/{ow}/{rn}", token)
+        except Exception:
+            meta = {"stargazers_count": 0, "forks_count": 0, "name": rn}
+        full = f"{ow}/{rn}".lower()
+        if full in [s.lower() for s in KNOWN_SPAM] or ow.lower() in OPIRE_IMPERSONATORS or ow.lower() in SPAM_ORGS:
+            continue
+        if (meta.get("stargazers_count", 0) or 0) < 5:
+            continue
+        tags = flag(it, meta)
+        rewards = REWARD_RE.findall((it.get("body") or "") + " " + (it.get("title") or ""))
+        rows.append((it.get("created_at", "")[:10], it.get("comments", 0), num, ow, rn, tags, rewards[:3], it["title"][:80], it["html_url"]))
+        time.sleep(0.2)
     rows.sort(reverse=True)
-    for cmts, num, own, repo, tags, rewards, title, url in rows:
+    if not rows:
+        print("# No viable bounty issues found.")
+        return
+    print(f"# viable: {len(rows)}")
+    for created, cmts, num, ow, rn, tags, rewards, title, url in rows:
         tagstr = ",".join(tags) if tags else "-"
         rew = ",".join(rewards) if rewards else "-"
-        print(f"[{cmts:3d}] {own}/{repo}#{num} tags={tagstr} reward~{rew}")
+        print(f"[{created}] [{cmts:2d}c] {ow}/{rn}#{num} tags={tagstr} reward~{rew}")
         print(f"      {title}")
         print(f"      {url}")
+        print()
 
 
 if __name__ == "__main__":
