@@ -22,12 +22,9 @@ KNOWN_SPAM = [
     "rohitdash08/FinMind", "iii123iii/Crystal-PDF", "daydreamsai/agent-bounties",
     "watney-ai/open-source-bounties", "tine1117/oss-hunter-livefire",
     "Pay-Per-Token-LLM-Gateway/pay-per-token-llm-gateway",
-        "Bitcoindefi/OpenAO", "liubaining-louis/louis-os",
-    "DenesePothoven54/cli", "LiliannaBruflat83/chi", "TrudieMasenheimer3/prometheus",
-    "CinnamonFaldet48/cli", "EstefanyLonsway6/traefik", "CurtFigone19/pgx",
-    "CornelParsch21/client-go", "KentonMaverick47/cobra", "aLexzzz430/Cognitive-OS",
+    "Bitcoindefi/OpenAO", "liubaining-louis/louis-os",
 ]
-OPIRE_IMPERSONATORS = {"rasoolharlym8", "colmev080", "morriganreza973", "Kristywvs22", "EncarnacionP", "WillSmithTE", "ClankerNation", "DenesePothoven54", "LiliannaBruflat83", "TrudieMasenheimer3", "CinnamonFaldet48", "EstefanyLonsway6", "CurtFigone19", "CornelParsch21", "KentonMaverick47", "aLexzzz430"}
+OPIRE_IMPERSONATORS = {"rasoolharlym8", "colmev080", "morriganreza973", "Kristywvs22", "EncarnacionP", "WillSmithTE", "ClankerNation", "DenesePothoven54", "LiliannaBruflat83", "TrudieMasenheimer3", "CinnamonFaldet48", "EstefanyLonsway6", "CurtFigone19", "CornelParsch21", "KentonMaverick47"}
 SPAM_ORGS = {"MyZubster-Ecosystem", "DanielIoni-creator", "jaxassistant55"}
 TOKEN_RE = re.compile(r"\b\d+(?:\.\d+)?\s*(RTC|MRG|GOLD|EGGS?|MYZ|AIPOU|GSD|TOKEN|COIN)\b", re.IGNORECASE)
 REWARD_RE = re.compile(r"\$\s?\d+(?:\.\d+)?|USDC\b|USDT\b", re.IGNORECASE)
