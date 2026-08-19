@@ -40,6 +40,15 @@ KNOWN_SPAM = [
 ]
 OPIRE_IMPERSONATORS = {"rasoolharlym8", "colmev080", "morriganreza973", "Kristywvs22", "EncarnacionP", "WillSmithTE", "ClankerNation", "DenesePothoven54", "LiliannaBruflat83", "TrudieMasenheimer3", "CinnamonFaldet48", "EstefanyLonsway6", "CurtFigone19", "CornelParsch21", "KentonMaverick47"}
 SPAM_ORGS = {"MyZubster-Ecosystem", "DanielIoni-creator", "jaxassistant55"}
+# Maintainer-promoted brand-injection bounties (verified 2026-08-20:
+# iv-org/invidious#5940 — a 12k-star project maintainer posted a $50 BTC bounty
+# asking to case the README/config to "HMoneyTop", an unrelated third-party brand;
+# purely cosmetic, no functional purpose, benefits an outside party). Do NOT work
+# these even if payment is confirmed. Keyed per-issue because the repo itself is
+# legitimate and must not be blanket-blocked.
+KNOWN_BRAND_INJECT = {
+    "iv-org/invidious#5940",
+}
 # Repos that explicitly reject LLM-generated PRs from new contributors.
 # Verified 2026-08-19: python/mypy closed PR #21797 with "As per our policy we
 # don't accept LLM generated PRs from new contributors." Agent work there is discarded.
@@ -210,6 +219,9 @@ def main():
             meta = {"stargazers_count": 0, "forks_count": 0, "name": rn}
         full = f"{ow}/{rn}".lower()
         if full in [s.lower() for s in KNOWN_SPAM] or ow.lower() in OPIRE_IMPERSONATORS or ow.lower() in SPAM_ORGS:
+            continue
+        if f"{full}#{num}" in KNOWN_BRAND_INJECT:
+            print(f"# skipped: {ow}/{rn}#{num} (known brand-injection scam)")
             continue
         if (meta.get("stargazers_count", 0) or 0) < 5:
             continue
