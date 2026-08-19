@@ -2,6 +2,18 @@
 """bounty-scout: scan GitHub for funded/open bounty issues and flag scam patterns.
 
 Quick scan with 3 targeted queries. Requires GITHUB_PAT env var.
+
+Modes:
+  (default)  bounty scan — 3 targeted searches for funded issues, scam-tagged
+  --bugs     fresh-bug pipeline — scan actively-maintained repos for fresh
+             0-1-comment, unassigned bug issues (best PR-fix candidates),
+             race-checked for competing PRs before listing
+
+Usage:
+  GITHUB_PAT=<token> python3 bounty_scout.py
+  GITHUB_PAT=<token> python3 bounty_scout.py --bugs
+  GITHUB_PAT=<token> python3 bounty_scout.py --bugs --repos aio-libs/aiohttp,pytest-dev/pytest
+  GITHUB_PAT=<token> python3 bounty_scout.py --bugs --days 21
 """
 
 import json
@@ -23,11 +35,24 @@ KNOWN_SPAM = [
     "watney-ai/open-source-bounties", "tine1117/oss-hunter-livefire",
     "Pay-Per-Token-LLM-Gateway/pay-per-token-llm-gateway",
     "Bitcoindefi/OpenAO", "liubaining-louis/louis-os",
+    "kindrat86/agentshield",  # AI-exclusion honeypot: agent work auto-discarded
+    "auscaster/frantic-board",  # pollutes label:funded with $1 micro-bounties
 ]
 OPIRE_IMPERSONATORS = {"rasoolharlym8", "colmev080", "morriganreza973", "Kristywvs22", "EncarnacionP", "WillSmithTE", "ClankerNation", "DenesePothoven54", "LiliannaBruflat83", "TrudieMasenheimer3", "CinnamonFaldet48", "EstefanyLonsway6", "CurtFigone19", "CornelParsch21", "KentonMaverick47"}
 SPAM_ORGS = {"MyZubster-Ecosystem", "DanielIoni-creator", "jaxassistant55"}
 TOKEN_RE = re.compile(r"\b\d+(?:\.\d+)?\s*(RTC|MRG|GOLD|EGGS?|MYZ|AIPOU|GSD|TOKEN|COIN)\b", re.IGNORECASE)
 REWARD_RE = re.compile(r"\$\s?\d+(?:\.\d+)?|USDC\b|USDT\b", re.IGNORECASE)
+
+# Default repo list for --bugs mode: actively-maintained, external-PR-friendly Python repos
+DEFAULT_BUG_REPOS = [
+    "aio-libs/aiohttp", "pytest-dev/pytest", "pallets/flask",
+    "psf/requests", "pydantic/pydantic", "sphinx-doc/sphinx",
+    "Textualize/rich", "sqlalchemy/sqlalchemy", "celery/celery",
+    "urllib3/urllib3", "fastapi/fastapi", "encode/httpx",
+    "encode/uvicorn", "benoitc/gunicorn", "pypa/pip",
+    "psf/black", "mitmproxy/mitmproxy", "pallets/werkzeug",
+    "pallets/jinja2", "httpie/cli",
+]
 
 
 def api(url, token):
@@ -57,14 +82,75 @@ def flag(issue, meta):
     return sorted(tags)
 
 
+def race_check(repo, issue_num, token):
+    """Search for open/closed PRs referencing this issue number. Returns list of (num, state)."""
+    try:
+        q = urllib.parse.quote(f'repo:{repo} is:pr "{issue_num}" in:body')
+        data = api(f"https://api.github.com/search/issues?q={q}&per_page=5", token)
+        return [(x["number"], x["state"]) for x in data.get("items", [])]
+    except Exception:
+        return [("ERR", "")]
+
+
+def scan_bugs(repos, token, days):
+    import datetime
+    cutoff = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=days)
+    found = 0
+    for repo in repos:
+        try:
+            issues = api(f"https://api.github.com/repos/{repo}/issues?labels=bug&state=open&sort=created&direction=desc&per_page=10", token)
+        except Exception as e:
+            print(f"# {repo}: API error {e}", file=sys.stderr)
+            continue
+        cands = []
+        for it in issues:
+            if it.get("pull_request") or it.get("assignee") or it.get("comments", 0) > 1:
+                continue
+            created = datetime.datetime.fromisoformat(it["created_at"].replace("Z", "+00:00"))
+            if created >= cutoff:
+                cands.append(it)
+        if not cands:
+            print(f"# {repo}: no fresh {days}d 0-1-comment unassigned bug issues")
+            continue
+        for it in cands:
+            races = race_check(repo, it["number"], token)
+            raced = "RACE!" if any(s == "open" for _, s in races) else "clean"
+            print(f"[{it['created_at'][:10]}] [{it['comments']}c] {repo}#{it['number']} {raced}")
+            print(f"      {it['title'][:90]}")
+            print(f"      {it['html_url']}")
+            if races:
+                print(f"      PRs: " + ", ".join(f"#{n} {s}" for n, s in races))
+            print()
+            found += 1
+            time.sleep(0.2)
+    if not found:
+        print("# No fresh unclaimed bug candidates found.")
+    else:
+        print(f"# candidates: {found} (race-checked)")
+
+
 def main():
+    args = [a for a in sys.argv[1:]]
     token = os.environ.get("GITHUB_PAT", "")
     if not token:
         sys.exit("GITHUB_PAT env var required")
+    if "--bugs" in args:
+        repos = DEFAULT_BUG_REPOS
+        days = 14
+        if "--repos" in args:
+            i = args.index("--repos")
+            repos = [r.strip() for r in args[i + 1].split(",") if r.strip()]
+        if "--days" in args:
+            i = args.index("--days")
+            days = int(args[i + 1])
+        print(f"# fresh-bug scan: {len(repos)} repos, last {days} days")
+        scan_bugs(repos, token, days)
+        return
+
     queries = [
         'label:"$100" OR label:"$200" OR label:"$250" OR label:"$500" is:issue is:open',
         'label:bounty label:bug is:issue is:open no:assignee',
-        'label:"💎 Bounty" state:open',
+        'label:"\U0001F48E Bounty" state:open',
     ]
     seen = {}
     for q in queries:
