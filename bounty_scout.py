@@ -87,13 +87,20 @@ def flag(issue, meta):
 
 
 def race_check(repo, issue_num, token):
-    """Search for open/closed PRs referencing this issue number. Returns list of (num, state)."""
-    try:
-        q = urllib.parse.quote(f'repo:{repo} is:pr "{issue_num}" in:body')
-        data = api(f"https://api.github.com/search/issues?q={q}&per_page=5", token)
-        return [(x["number"], x["state"]) for x in data.get("items", [])]
-    except Exception:
-        return [("ERR", "")]
+    """Search for open/closed PRs referencing this issue number. Returns list of (num, state).
+    Retries once on transient failure; on persistent failure returns [] (unknown) instead of
+    a fake ('ERR', '') row that mislabels the candidate as PRIOR-PR."""
+    for attempt in (1, 2):
+        try:
+            q = urllib.parse.quote(f'repo:{repo} is:pr "{issue_num}" in:body')
+            data = api(f"https://api.github.com/search/issues?q={q}&per_page=5", token)
+            return [(x["number"], x["state"]) for x in data.get("items", [])]
+        except Exception as e:
+            if attempt == 1:
+                time.sleep(1.0)
+            else:
+                print(f"# race-check failed for {repo}#{issue_num}: {e}", file=sys.stderr)
+    return []
 
 
 def scan_bugs(repos, token, days):
@@ -163,18 +170,30 @@ def main():
         scan_bugs(repos, token, days)
         return
 
+    # 2026-08-20: GitHub search API now rejects OR-combining multiple label:"$NNN"
+    # qualifiers with HTTP 422. Split into per-label queries (each alone still works).
     queries = [
-        'label:"$100" OR label:"$200" OR label:"$250" OR label:"$500" is:issue is:open',
+        'label:"$100" is:issue is:open',
+        'label:"$200" is:issue is:open',
+        'label:"$250" is:issue is:open',
+        'label:"$500" is:issue is:open',
         'label:bounty label:bug is:issue is:open no:assignee',
         'label:"\U0001F48E Bounty" state:open',
     ]
     seen = {}
     for q in queries:
         url = "https://api.github.com/search/issues?q=" + urllib.parse.quote(q) + "&sort=created&order=desc&per_page=8"
-        try:
-            data = api(url, token)
-        except Exception as e:
-            print(f"# query failed: {e}", file=sys.stderr)
+        for attempt in (1, 2):
+            try:
+                data = api(url, token)
+                break
+            except Exception as e:
+                if attempt == 1:
+                    time.sleep(2.0)  # search API rate limit is 10/min with a token
+                else:
+                    print(f"# query failed: {e}", file=sys.stderr)
+                    data = None
+        if data is None:
             continue
         for it in data.get("items", []):
             if it.get("pull_request") or it["number"] in seen:
