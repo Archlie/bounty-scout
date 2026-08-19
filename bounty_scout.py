@@ -40,6 +40,10 @@ KNOWN_SPAM = [
 ]
 OPIRE_IMPERSONATORS = {"rasoolharlym8", "colmev080", "morriganreza973", "Kristywvs22", "EncarnacionP", "WillSmithTE", "ClankerNation", "DenesePothoven54", "LiliannaBruflat83", "TrudieMasenheimer3", "CinnamonFaldet48", "EstefanyLonsway6", "CurtFigone19", "CornelParsch21", "KentonMaverick47"}
 SPAM_ORGS = {"MyZubster-Ecosystem", "DanielIoni-creator", "jaxassistant55"}
+# Repos that explicitly reject LLM-generated PRs from new contributors.
+# Verified 2026-08-19: python/mypy closed PR #21797 with "As per our policy we
+# don't accept LLM generated PRs from new contributors." Agent work there is discarded.
+LLM_BANNED_REPOS = {"python/mypy"}
 TOKEN_RE = re.compile(r"\b\d+(?:\.\d+)?\s*(RTC|MRG|GOLD|EGGS?|MYZ|AIPOU|GSD|TOKEN|COIN)\b", re.IGNORECASE)
 REWARD_RE = re.compile(r"\$\s?\d+(?:\.\d+)?|USDC\b|USDT\b", re.IGNORECASE)
 
@@ -97,6 +101,9 @@ def scan_bugs(repos, token, days):
     cutoff = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=days)
     found = 0
     for repo in repos:
+        if repo in LLM_BANNED_REPOS:
+            print(f"# {repo}: SKIPPED - repo rejects LLM-generated PRs from new contributors")
+            continue
         try:
             issues = api(f"https://api.github.com/repos/{repo}/issues?labels=bug&state=open&sort=created&direction=desc&per_page=10", token)
         except Exception as e:
@@ -114,7 +121,16 @@ def scan_bugs(repos, token, days):
             continue
         for it in cands:
             races = race_check(repo, it["number"], token)
-            raced = "RACE!" if any(s == "open" for _, s in races) else "clean"
+            if any(s == "open" for _, s in races):
+                raced = "RACE!"
+            elif races:
+                # every found PR is closed — could be merged (fix shipped) or
+                # auto-closed (triage gate, rejection, deferral). Read the
+                # closure reason before investing. Verified: scikit-learn#34734's
+                # PR #34743 was bot-closed 27s after opening (Needs Triage).
+                raced = "PRIOR-PR"
+            else:
+                raced = "clean"
             print(f"[{it['created_at'][:10]}] [{it['comments']}c] {repo}#{it['number']} {raced}")
             print(f"      {it['title'][:90]}")
             print(f"      {it['html_url']}")
