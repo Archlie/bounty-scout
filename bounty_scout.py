@@ -37,6 +37,14 @@ KNOWN_SPAM = [
     "Bitcoindefi/OpenAO", "liubaining-louis/louis-os",
     "kindrat86/agentshield",  # AI-exclusion honeypot: agent work auto-discarded
     "auscaster/frantic-board",  # pollutes label:funded with $1 micro-bounties
+    "mister3ai-cmyk/ngp-sovereign-synesis-bounties",  # fresh 2026-08-20 repo, $60K USDC
+    # "bounties" requiring physical lab hardware (Hamilton STARlet, DryLab4, Waters
+    # Empower) — impossible for remote agents; engagement-bait pattern, 0 stars.
+    "zhangjiayang6835-cyber/bounty-plaza",  # same $55K USDC bounty set as mister3ai-cmyk,
+    # copied verbatim (ChIP-seq, Karabut, DryLab4/SiLA2) into a 6-star/39-fork repo
+    # (2026-07-08) — multi-location engagement bait, 0 comments on bounties.
+    "Nexussyn/ai-growth-platform",  # 1-star/22-fork repo (2026-06-08) re-selling the same
+    # $55K USDC engagement-bait bounty set as agent tasks; verified 2026-08-20.
 ]
 OPIRE_IMPERSONATORS = {"rasoolharlym8", "colmev080", "morriganreza973", "Kristywvs22", "EncarnacionP", "WillSmithTE", "ClankerNation", "DenesePothoven54", "LiliannaBruflat83", "TrudieMasenheimer3", "CinnamonFaldet48", "EstefanyLonsway6", "CurtFigone19", "CornelParsch21", "KentonMaverick47"}
 SPAM_ORGS = {"MyZubster-Ecosystem", "DanielIoni-creator", "jaxassistant55"}
