@@ -269,24 +269,43 @@ def main():
 
     # 2026-08-20: GitHub search API now rejects OR-combining multiple label:"$NNN"
     # qualifiers with HTTP 422. Split into per-label queries (each alone still works).
+    # 2026-08-21: added label:reward, label:sponsor, and body-text searches for
+    # "bounty"/"funded" in repos with 100+ stars (catches unlabeled bounties).
     queries = [
         'label:"$100" is:issue is:open',
         'label:"$200" is:issue is:open',
         'label:"$250" is:issue is:open',
         'label:"$500" is:issue is:open',
         'label:bounty label:bug is:issue is:open no:assignee',
-        'label:"\U0001F48E Bounty" state:open',
+        'label:"💎 Bounty" state:open',
+        'label:reward is:issue is:open no:assignee',
+        'label:sponsor is:issue is:open no:assignee',
+        'stars:>100 bounty in:body is:issue is:open no:assignee',
+        'stars:>100 funded in:body is:issue is:open no:assignee',
     ]
     seen = {}
-    for q in queries:
+    for qi, q in enumerate(queries):
+        if qi > 0:
+            time.sleep(10.0)  # 30/min search limit; 10s spacing keeps 10 queries safe
         url = "https://api.github.com/search/issues?q=" + urllib.parse.quote(q) + "&sort=created&order=desc&per_page=8"
-        for attempt in (1, 2):
+        data = None
+        for attempt in (1, 2, 3):
             try:
                 data = api(url, token)
                 break
+            except urllib.error.HTTPError as e:
+                # Search API is 30 req/min with a token; secondary limits fire
+                # when 10+ queries run back-to-back. Back off hard, then retry.
+                data = None
+                if e.code == 403:
+                    time.sleep(30.0 * attempt)
+                else:
+                    print(f"# query failed: {e}", file=sys.stderr)
+                    break
             except Exception as e:
                 if attempt == 1:
-                    time.sleep(2.0)  # search API rate limit is 10/min with a token
+                    time.sleep(10.0)
+                    data = None
                 else:
                     print(f"# query failed: {e}", file=sys.stderr)
                     data = None
