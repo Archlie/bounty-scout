@@ -8,12 +8,16 @@ Modes:
   --bugs     fresh-bug pipeline — scan actively-maintained repos for fresh
              0-1-comment, unassigned bug issues (best PR-fix candidates),
              race-checked for competing PRs before listing
+  --mypulls  PR-health tracker — list the token owner's open PRs with age,
+             mergeability, per-commit CI status and comment count, so idle
+             cycles can spot stalled/failing work at a glance
 
 Usage:
   GITHUB_PAT=<token> python3 bounty_scout.py
   GITHUB_PAT=<token> python3 bounty_scout.py --bugs
   GITHUB_PAT=<token> python3 bounty_scout.py --bugs --repos aio-libs/aiohttp,pytest-dev/pytest
   GITHUB_PAT=<token> python3 bounty_scout.py --bugs --days 21
+  GITHUB_PAT=<token> python3 bounty_scout.py --mypulls
 """
 
 import json
@@ -179,11 +183,75 @@ def scan_bugs(repos, token, days):
         print(f"# candidates: {found} (race-checked)")
 
 
+def scan_mypulls(token):
+    """Track the token owner's open PRs: age, mergeability, head-commit CI, comments.
+    Flags DRAFT / CONFLICT / CI-FAIL / RUNNING so stalled work is visible in one pass."""
+    import datetime
+    me = api("https://api.github.com/user", token)
+    login = me.get("login", "?")
+    q = urllib.parse.quote(f"author:{login} is:pr is:open")
+    data = api(f"https://api.github.com/search/issues?q={q}&sort=updated&order=desc&per_page=25", token)
+    items = data.get("items", [])
+    print(f"# open PRs by {login}: {data.get('total_count', len(items))}")
+    now = datetime.datetime.now(datetime.timezone.utc)
+    rows = []
+    for it in items:
+        ow, rn = it["repository_url"].rsplit("/", 2)[-2:]
+        full = f"{ow}/{rn}"
+        pr = api(f"https://api.github.com/repos/{full}/pulls/{it['number']}", token)
+        created = datetime.datetime.fromisoformat(it["created_at"].replace("Z", "+00:00"))
+        age = (now - created).days
+        mergeable = pr.get("mergeable")
+        mstate = pr.get("mergeable_state")
+        sha = (pr.get("head") or {}).get("sha", "")
+        ci = "no-runs"
+        if sha:
+            try:
+                runs = api(f"https://api.github.com/repos/{full}/commits/{sha}/check-runs?per_page=50", token)
+                rs = runs.get("check_runs", [])
+                if any(r.get("status") != "completed" for r in rs):
+                    ci = "RUNNING"
+                else:
+                    # "Backport label added" is a maintainer-side gate (only
+                    # maintainers can add the label) — report as GATE, not FAIL.
+                    bad = sorted({(r.get("conclusion") or "?") for r in rs
+                                  if r.get("conclusion") not in ("success", "skipped", "neutral")})
+                    gate = [r["name"] for r in rs
+                            if r.get("name") == "Backport label added" and r.get("conclusion") == "failure"]
+                    if gate and bad == ["failure"]:
+                        ci = "GATE:backport-label"
+                    elif not bad:
+                        ci = "OK"
+                    else:
+                        ci = "FAIL:" + ",".join(bad)[:40]
+            except Exception as e:
+                ci = f"err:{str(e)[:24]}"
+        flags = []
+        if pr.get("draft"):
+            flags.append("DRAFT")
+        if mergeable is False:
+            flags.append("CONFLICT")
+        if ci.startswith("FAIL"):
+            flags.append("CI-FAIL")
+        rows.append((age, created.strftime("%Y-%m-%d"), full, it["number"], ci,
+                     str(mergeable), mstate or "", it.get("comments", 0),
+                     ",".join(flags) or "-", it["title"][:70], it["html_url"]))
+        time.sleep(0.2)
+    for age, created, full, num, ci, mergeable, mstate, cmts, flags, title, url in sorted(rows, reverse=True):
+        print(f"[{created}] [{age:3d}d] {full}#{num} ci={ci:12s} mergeable={mergeable:5s}/{mstate:8s} [{cmts}c] {flags}")
+        print(f"      {title}")
+        print(f"      {url}")
+    return rows
+
+
 def main():
     args = [a for a in sys.argv[1:]]
     token = os.environ.get("GITHUB_PAT", "")
     if not token:
         sys.exit("GITHUB_PAT env var required")
+    if "--mypulls" in args:
+        scan_mypulls(token)
+        return
     if "--bugs" in args:
         repos = DEFAULT_BUG_REPOS + (EXTENDED_BUG_REPOS if "--extended" in args else [])
         days = 14
