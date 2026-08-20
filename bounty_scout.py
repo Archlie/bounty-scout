@@ -209,7 +209,9 @@ def scan_mypulls(token):
             try:
                 runs = api(f"https://api.github.com/repos/{full}/commits/{sha}/check-runs?per_page=50", token)
                 rs = runs.get("check_runs", [])
-                if any(r.get("status") != "completed" for r in rs):
+                if not rs:
+                    ci = "no-runs"
+                elif any(r.get("status") != "completed" for r in rs):
                     ci = "RUNNING"
                 else:
                     # "Backport label added" is a maintainer-side gate (only
