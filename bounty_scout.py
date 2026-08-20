@@ -60,6 +60,8 @@ SPAM_ORGS = {"MyZubster-Ecosystem", "DanielIoni-creator", "jaxassistant55"}
 # legitimate and must not be blanket-blocked.
 KNOWN_BRAND_INJECT = {
     "iv-org/invidious#5940",
+    "iv-org/invidious#5957",  # same HMoney* alias-injection bait: add "HMooneyPot" alias
+    # to Invidious for a $50 bounty — cosmetic, benefits an outside brand.
 }
 # Repos that explicitly reject LLM-generated PRs from new contributors.
 # Verified 2026-08-19: python/mypy closed PR #21797 with "As per our policy we
@@ -118,9 +120,10 @@ def flag(issue, meta):
 
 
 def race_check(repo, issue_num, token):
-    """Search for open/closed PRs referencing this issue number. Returns list of (num, state).
-    Retries once on transient failure; on persistent failure returns [] (unknown) instead of
-    a fake ('ERR', '') row that mislabels the candidate as PRIOR-PR."""
+    """Search for open/closed PRs referencing this issue number. Returns list of (num, state),
+    or None when the check itself failed (rate limit, network) — None means UNKNOWN, which the
+    caller must NOT label "clean". Retries once on transient failure; on persistent failure
+    returns None instead of [] so a blind check is never confused with "no competing PRs"."""
     for attempt in (1, 2):
         try:
             q = urllib.parse.quote(f'repo:{repo} is:pr "{issue_num}" in:body')
@@ -131,7 +134,7 @@ def race_check(repo, issue_num, token):
                 time.sleep(1.0)
             else:
                 print(f"# race-check failed for {repo}#{issue_num}: {e}", file=sys.stderr)
-    return []
+    return None
 
 
 def scan_bugs(repos, token, days):
@@ -159,7 +162,12 @@ def scan_bugs(repos, token, days):
             continue
         for it in cands:
             races = race_check(repo, it["number"], token)
-            if any(s == "open" for _, s in races):
+            if races is None:
+                # check failed (403/network) — answer is UNKNOWN, never "clean".
+                # A blind race-check mislabeled as clean has previously cost cycles
+                # reproducing issues that already had open PRs.
+                raced = "UNKNOWN"
+            elif any(s == "open" for _, s in races):
                 raced = "RACE!"
             elif races:
                 # every found PR is closed — could be merged (fix shipped) or
