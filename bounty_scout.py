@@ -74,6 +74,16 @@ DEFAULT_BUG_REPOS = [
     "psf/black", "mitmproxy/mitmproxy", "pallets/werkzeug",
     "pallets/jinja2", "httpie/cli",
 ]
+EXTENDED_BUG_REPOS = [
+    "python/cpython", "numpy/numpy", "scipy/scipy",
+    "matplotlib/matplotlib", "sympy/sympy", "scikit-learn/scikit-learn",
+    "networkx/networkx", "django/django", "getsentry/sentry",
+    "ansible/ansible", "zulip/zulip", "npm/cli",
+    "sveltejs/svelte", "axios/axios", "prettier/prettier",
+    "vitest-dev/vitest", "babel/babel", "microsoft/debugpy",
+    "apache/airflow", "apache/superset", "nektos/act",
+    "astral-sh/uv", "hashicorp/terraform", "go-gitea/gitea",
+]
 
 
 def api(url, token):
@@ -175,7 +185,7 @@ def main():
     if not token:
         sys.exit("GITHUB_PAT env var required")
     if "--bugs" in args:
-        repos = DEFAULT_BUG_REPOS
+        repos = DEFAULT_BUG_REPOS + (EXTENDED_BUG_REPOS if "--extended" in args else [])
         days = 14
         if "--repos" in args:
             i = args.index("--repos")
